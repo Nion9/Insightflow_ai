@@ -1,0 +1,51 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+
+# Virtual Environment
+venv/
+.venv
+
+# Streamlit
+.streamlit/
+
+# Vector Database
+chroma_db/
+
+# Temporary files
+temp_audio.mp3
+temp_audio.webm
+temp_audio.m4a
+*.mp3
+*.mp4
+*.wav
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Model cache
+.cache/
+models/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Environment variables
+.env

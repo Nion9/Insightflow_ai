@@ -1,0 +1,9 @@
+yt-dlp
+openai-whisper
+langchain-text-splitters
+langchain-community
+langchain-core
+chromadb
+sentence-transformers
+torch
+streamlit
