@@ -229,8 +229,8 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 **Minhajul Islam Nion**
 - Email: minhajulislamnion@gmail.com
 - University: University of Canberra
-- LinkedIn: [Your LinkedIn](https://linkedin.com/in/yourprofile)
-- GitHub: [@yourusername](https://github.com/yourusername)
+- LinkedIn: [Nion007](www.linkedin.com/in/nion007)
+- GitHub: [@Nion9](https://github.com/Nion9)
 
 ## 📧 Contact
 
