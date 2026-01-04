@@ -239,5 +239,5 @@ For questions or feedback, please reach out via email or open an issue on GitHub
 ---
 
 <div align="center">
-Made with ❤️ by Nion | Built for recruiters and AI enthusiasts
+Built for recruiters and AI enthusiasts
 </div>
