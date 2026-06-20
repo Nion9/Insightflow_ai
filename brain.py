@@ -1,105 +1,109 @@
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_community.vectorstores import Chroma
-from langchain_community.embeddings import SentenceTransformerEmbeddings
+"""Vector store + RAG chain.
+
+Uses HuggingFace sentence-transformers for embeddings, in-memory Chroma for
+storage, and Gemini for generation. If no API key is configured the chain
+factory returns None and the caller can fall back to similarity-only search.
+"""
+from __future__ import annotations
+
 import os
+from typing import List, Optional
 
-def create_searchable_db(text):
-    """
-    Create a vector database from text for semantic search
-    
-    Args:
-        text: The transcript text to process
-        
-    Returns:
-        vector_db: ChromaDB vector store
-    """
-    try:
-        # 1. Break long text into smaller chunks
-        print("Splitting text into chunks...")
-        text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=1000, 
-            chunk_overlap=100
+from langchain_chroma import Chroma
+from langchain_core.output_parsers import StrOutputParser
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.runnables import Runnable, RunnablePassthrough
+from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+
+
+EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
+LLM_MODEL = "gemini-2.0-flash"
+
+_RAG_SYSTEM = (
+    "You answer questions about a video using ONLY the transcript context "
+    "provided. If the context doesn't contain the answer, say so plainly — "
+    "do not invent. Quote sparingly; prefer concise synthesis. When useful, "
+    "reference passages as [1], [2], etc., matching the source order."
+)
+
+RAG_PROMPT = ChatPromptTemplate.from_messages([
+    ("system", _RAG_SYSTEM + "\n\nContext:\n{context}"),
+    ("human", "{question}"),
+])
+
+
+# ---------- Embeddings cache ----------
+
+_EMBEDDINGS: Optional[HuggingFaceEmbeddings] = None
+
+
+def _get_embeddings() -> HuggingFaceEmbeddings:
+    global _EMBEDDINGS
+    if _EMBEDDINGS is None:
+        _EMBEDDINGS = HuggingFaceEmbeddings(model_name=EMBEDDING_MODEL)
+    return _EMBEDDINGS
+
+
+# ---------- Vector store ----------
+
+def build_vectorstore(text: str, chunk_size: int = 1000, chunk_overlap: int = 150) -> Chroma:
+    """Split text and build an in-memory Chroma index."""
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=chunk_size,
+        chunk_overlap=chunk_overlap,
+        separators=["\n\n", "\n", ". ", " ", ""],
+    )
+    chunks = splitter.split_text(text)
+    if not chunks:
+        raise ValueError("No content to index — transcript was empty.")
+    return Chroma.from_texts(texts=chunks, embedding=_get_embeddings())
+
+
+def search(vectorstore: Chroma, query: str, k: int = 4) -> List[str]:
+    """Top-k similarity hits as plain strings."""
+    docs = vectorstore.similarity_search(query, k=k)
+    return [d.page_content for d in docs]
+
+
+# ---------- RAG chain ----------
+
+def make_qa_chain(vectorstore: Chroma, api_key: Optional[str] = None) -> Optional[Runnable]:
+    """Build a Gemini-backed RAG chain. Returns None if no API key is available."""
+    api_key = api_key or os.getenv("GOOGLE_API_KEY")
+    if not api_key:
+        return None
+
+    llm = ChatGoogleGenerativeAI(
+        model=LLM_MODEL,
+        google_api_key=api_key,
+        temperature=0.2,
+    )
+    retriever = vectorstore.as_retriever(search_kwargs={"k": 4})
+
+    def _format(docs) -> str:
+        return "\n\n".join(
+            f"[{i}] {d.page_content}" for i, d in enumerate(docs, 1)
         )
-        chunks = text_splitter.split_text(text)
-        print(f"✓ Created {len(chunks)} chunks")
-        
-        # 2. Convert text chunks into "Numbers" (Embeddings)
-        print("Loading embedding model...")
-        embeddings = SentenceTransformerEmbeddings(
-            model_name="all-MiniLM-L6-v2"
-        )
-        print("✓ Embedding model loaded")
-        
-        # 3. Create the database
-        print("Creating vector database...")
-        vector_db = Chroma.from_texts(
-            texts=chunks,
-            embedding=embeddings,
-            persist_directory="./chroma_db"
-        )
-        print("✓ Vector database created")
-        
-        return vector_db
-        
-    except Exception as e:
-        print(f"Error creating searchable database: {e}")
-        raise
+
+    return (
+        {"context": retriever | _format, "question": RunnablePassthrough()}
+        | RAG_PROMPT
+        | llm
+        | StrOutputParser()
+    )
 
 
-def search_database(vector_db, query, k=3):
-    """
-    Search the vector database for relevant information
-    
-    Args:
-        vector_db: ChromaDB vector store
-        query: Question to search for
-        k: Number of results to return
-        
-    Returns:
-        List of relevant text chunks
-    """
-    try:
-        results = vector_db.similarity_search(query, k=k)
-        return [doc.page_content for doc in results]
-    except Exception as e:
-        print(f"Error searching database: {e}")
-        raise
+# ---------- Smoke test ----------
 
-
-def load_existing_db():
-    """Load an existing vector database"""
-    try:
-        embeddings = SentenceTransformerEmbeddings(
-            model_name="all-MiniLM-L6-v2"
-        )
-        vector_db = Chroma(
-            persist_directory="./chroma_db",
-            embedding_function=embeddings
-        )
-        return vector_db
-    except Exception as e:
-        print(f"Error loading database: {e}")
-        raise
-
-
-# Example usage
 if __name__ == "__main__":
-    # Test with sample text
-    sample_text = """
-    Machine learning is a subset of artificial intelligence that focuses on 
-    enabling computers to learn from data without being explicitly programmed. 
-    Deep learning, a subset of machine learning, uses neural networks with 
-    multiple layers to learn complex patterns in data.
-    """
-    
-    # Create database
-    db = create_searchable_db(sample_text)
-    
-    # Search database
-    query = "What is deep learning?"
-    results = search_database(db, query)
-    
-    print(f"\nQuery: {query}")
-    print("\nResults:")
-    for i, result in enumerate(results, 1):
-        print(f"{i}. {result}\n")
+    sample = (
+        "Machine learning enables computers to learn patterns from data. "
+        "Deep learning is a subset that uses neural networks with many layers. "
+        "Transformers are the dominant architecture for language tasks today."
+    )
+    vs = build_vectorstore(sample, chunk_size=80, chunk_overlap=20)
+    print("Top hits for 'What is deep learning?':")
+    for hit in search(vs, "What is deep learning?"):
+        print(" -", hit)

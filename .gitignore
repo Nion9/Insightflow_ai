@@ -4,48 +4,34 @@ __pycache__/
 *$py.class
 *.so
 .Python
+build/
+dist/
+*.egg-info/
+
+# Environments
 venv/
 env/
-ENV/
-
-# Virtual Environment
-venv/
-.venv
+.venv/
+.env
 
 # Streamlit
-.streamlit/
+.streamlit/secrets.toml
 
-# Vector Database
+# Project artefacts
 chroma_db/
-
-# Temporary files
-temp_audio.mp3
-temp_audio.webm
-temp_audio.m4a
+temp_audio.*
+transcript.txt
+audio.*
 *.mp3
-*.mp4
-*.wav
+*.webm
+*.m4a
+insightflow_*/
 
 # IDE
 .vscode/
 .idea/
 *.swp
-*.swo
-*~
 
 # OS
 .DS_Store
 Thumbs.db
-
-# Logs
-*.log
-
-# Model cache
-.cache/
-models/
-
-# Jupyter
-.ipynb_checkpoints/
-
-# Environment variables
-.env

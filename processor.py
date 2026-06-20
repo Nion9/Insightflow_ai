@@ -1,90 +1,143 @@
-import yt_dlp
+"""YouTube audio download + Whisper transcription.
+
+Cross-platform ffmpeg detection: PATH first, then common install locations.
+Whisper models are cached in-process so repeated transcriptions reuse them.
+"""
+from __future__ import annotations
+
 import os
+import shutil
+import tempfile
+from pathlib import Path
+from typing import Dict, Optional
+
 import whisper
+import yt_dlp
 
-# Set FFmpeg path for this session
-os.environ["PATH"] += os.pathsep + r"D:\ffmpeg-2025-12-31-git-38e89fe502-essentials_build\ffmpeg-2025-12-31-git-38e89fe502-essentials_build\bin"
 
-def download_video_and_extract_audio(url):
-    """Download video from URL and extract audio as MP3"""
-    output_path = "temp_audio.mp3"
-    
+# ---------- ffmpeg discovery ----------
+
+class FFmpegNotFoundError(RuntimeError):
+    """Raised when ffmpeg cannot be located on the system."""
+
+
+def _find_ffmpeg_dir() -> Optional[str]:
+    """Return the directory containing ffmpeg, or None if not found."""
+    on_path = shutil.which("ffmpeg")
+    if on_path:
+        return str(Path(on_path).parent)
+
+    exe = "ffmpeg.exe" if os.name == "nt" else "ffmpeg"
+    candidates = [
+        Path("C:/ffmpeg/bin"),
+        Path("C:/Program Files/ffmpeg/bin"),
+        Path("/usr/local/bin"),
+        Path("/usr/bin"),
+        Path("/opt/homebrew/bin"),
+        Path.home() / "ffmpeg" / "bin",
+    ]
+    for c in candidates:
+        if (c / exe).exists():
+            return str(c)
+    return None
+
+
+FFMPEG_DIR = _find_ffmpeg_dir()
+if FFMPEG_DIR and FFMPEG_DIR not in os.environ.get("PATH", ""):
+    os.environ["PATH"] = FFMPEG_DIR + os.pathsep + os.environ.get("PATH", "")
+
+
+# ---------- Audio download ----------
+
+def download_audio(url: str, output_dir: Optional[str] = None) -> str:
+    """Download a YouTube video's audio as MP3.
+
+    Args:
+        url: YouTube URL.
+        output_dir: Where to write the MP3. A new temp dir is used if omitted.
+
+    Returns:
+        Absolute path to the MP3 file.
+    """
+    if FFMPEG_DIR is None:
+        raise FFmpegNotFoundError(
+            "ffmpeg not found on PATH. Install it and retry:\n"
+            "  • Windows: https://www.gyan.dev/ffmpeg/builds/\n"
+            "  • macOS:   brew install ffmpeg\n"
+            "  • Linux:   sudo apt install ffmpeg"
+        )
+
+    workdir = output_dir or tempfile.mkdtemp(prefix="insightflow_")
+    template = str(Path(workdir) / "audio.%(ext)s")
+
     ydl_opts = {
-        'format': 'bestaudio/best',
-        'outtmpl': 'temp_audio.%(ext)s',
-        'postprocessors': [{
-            'key': 'FFmpegExtractAudio',
-            'preferredcodec': 'mp3',
-            'preferredquality': '192',
+        "format": "bestaudio/best",
+        "outtmpl": template,
+        "postprocessors": [{
+            "key": "FFmpegExtractAudio",
+            "preferredcodec": "mp3",
+            "preferredquality": "192",
         }],
-        'ffmpeg_location': r"D:\ffmpeg-2025-12-31-git-38e89fe502-essentials_build\ffmpeg-2025-12-31-git-38e89fe502-essentials_build\bin",
-        'quiet': False,
-        'no_warnings': False,
+        "ffmpeg_location": FFMPEG_DIR,
+        "quiet": True,
+        "no_warnings": True,
     }
-    
+
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        ydl.download([url])
+
+    mp3 = Path(workdir) / "audio.mp3"
+    if not mp3.exists():
+        raise FileNotFoundError(f"Audio extraction failed: {mp3}")
+    return str(mp3)
+
+
+# ---------- Whisper transcription ----------
+
+_MODEL_CACHE: Dict[str, "whisper.Whisper"] = {}
+
+
+def transcribe(audio_path: str, model_size: str = "base") -> str:
+    """Transcribe an audio file with Whisper. Models are cached per size."""
+    if not Path(audio_path).exists():
+        raise FileNotFoundError(audio_path)
+
+    if model_size not in _MODEL_CACHE:
+        _MODEL_CACHE[model_size] = whisper.load_model(model_size)
+
+    result = _MODEL_CACHE[model_size].transcribe(audio_path)
+    return result["text"].strip()
+
+
+# ---------- Cleanup ----------
+
+def cleanup(audio_path: str) -> None:
+    """Delete the audio file and its parent dir if it was a temp dir."""
+    p = Path(audio_path)
+    if not p.exists():
+        return
+    parent = p.parent
     try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([url])
-        
-        if not os.path.exists(output_path):
-            raise FileNotFoundError(f"Audio file not created: {output_path}")
-            
-        return output_path
-    except Exception as e:
-        print(f"Error downloading video: {e}")
-        raise
+        p.unlink()
+    except OSError:
+        pass
+    if parent.name.startswith("insightflow_"):
+        shutil.rmtree(parent, ignore_errors=True)
 
-def transcribe_audio(file_path):
-    """Transcribe audio file using Whisper"""
-    if not os.path.exists(file_path):
-        raise FileNotFoundError(f"Audio file not found: {file_path}")
-    
-    try:
-        print("Loading Whisper model...")
-        model = whisper.load_model("base")
-        
-        print(f"Transcribing {file_path}...")
-        result = model.transcribe(file_path)
-        
-        return result['text']
-    except Exception as e:
-        print(f"Error during transcription: {e}")
-        raise
 
-def cleanup_temp_files():
-    """Remove temporary audio files"""
-    temp_files = ['temp_audio.mp3', 'temp_audio.webm', 'temp_audio.m4a']
-    for file in temp_files:
-        if os.path.exists(file):
-            os.remove(file)
-            print(f"Cleaned up {file}")
+# ---------- CLI ----------
 
-# Main execution
 if __name__ == "__main__":
-    # Example usage
-    video_url = input("Enter YouTube URL: ")
-    
+    url = input("YouTube URL: ").strip()
+    audio = None
     try:
-        # Step 1: Download and extract audio
-        print("\n--- Downloading video and extracting audio ---")
-        audio_file = download_video_and_extract_audio(video_url)
-        print(f"✓ Audio extracted: {audio_file}")
-        
-        # Step 2: Transcribe audio
-        print("\n--- Transcribing audio ---")
-        transcript = transcribe_audio(audio_file)
-        print("\n--- Transcript ---")
-        print(transcript)
-        
-        # Step 3: Save transcript to file
-        with open("transcript.txt", "w", encoding="utf-8") as f:
-            f.write(transcript)
-        print("\n✓ Transcript saved to transcript.txt")
-        
-    except Exception as e:
-        print(f"\n✗ Error: {e}")
-    
+        audio = download_audio(url)
+        print(f"✓ Audio: {audio}")
+        text = transcribe(audio)
+        print("\n--- Transcript (first 500 chars) ---")
+        print(text[:500])
+        Path("transcript.txt").write_text(text, encoding="utf-8")
+        print("\n✓ Saved to transcript.txt")
     finally:
-        # Step 4: Cleanup temporary files
-        print("\n--- Cleaning up ---")
-        cleanup_temp_files()
+        if audio:
+            cleanup(audio)
