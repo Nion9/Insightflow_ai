@@ -1,5 +1,5 @@
 streamlit==1.39.0
-yt-dlp==2024.12.13
+yt-dlp>=2025.1
 openai-whisper @ git+https://github.com/openai/whisper.git
 
 # LangChain stack
