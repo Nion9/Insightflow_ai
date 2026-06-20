@@ -1,6 +1,6 @@
 streamlit==1.39.0
 yt-dlp==2024.12.13
-openai-whisper==20240930
+openai-whisper @ git+https://github.com/openai/whisper.git
 
 # LangChain stack
 langchain==0.3.7
@@ -15,5 +15,4 @@ chromadb==0.5.18
 sentence-transformers==3.2.1
 
 # Whisper backend
-torch==2.5.1
-numpy<2
+torch>=2.5
